@@ -92,8 +92,10 @@ test('production cold offline navigation retains a real program, edits, completi
   await page.getByLabel('Название программы', { exact: true }).fill('Офлайн программа');
   await page.getByRole('button', { name: 'Добавить тренировку', exact: true }).click();
   await page.getByLabel('Название тренировки', { exact: true }).fill('Офлайн тренировка');
+  await page.getByLabel('Описание тренировки', { exact: true }).fill('Разминка 5 минут\nСпокойный темп');
   await page.getByRole('button', { name: 'Добавить упражнение', exact: true }).click();
   await page.getByRole('textbox', { name: 'Упражнение 1', exact: true }).fill('Приседания');
+  await page.getByLabel('Описание упражнения', { exact: true }).fill('Спина ровная\nОтдых 90 секунд');
   await page.getByLabel('Вес, кг, упражнение 1, подход 1', { exact: true }).fill('40');
   await page.getByLabel('Повторы, упражнение 1, подход 1', { exact: true }).fill('8');
   await page.getByRole('button', { name: 'Сохранить программу', exact: true }).click();
@@ -111,6 +113,8 @@ test('production cold offline navigation retains a real program, edits, completi
   await navigate(page, 'Программы');
   await expect(page.getByRole('heading', { name: 'Офлайн программа', exact: true })).toBeVisible();
   await navigate(page, 'Тренировка');
+  await expect(page.locator('.workout-description')).toHaveText('Разминка 5 минут\nСпокойный темп');
+  await expect(page.locator('.exercise-description')).toHaveText('Спина ровная\nОтдых 90 секунд');
   await page.getByRole('button', { name: 'Изменить Приседания', exact: true }).click();
   await page.getByLabel('Вес, подход 1', { exact: true }).fill('42,5');
   await expect(page.getByText('Изменения сохранены на этом телефоне')).toBeVisible();
@@ -133,5 +137,14 @@ test('production cold offline navigation retains a real program, edits, completi
   await expect(history.getByRole('heading', { name: 'Приседания', exact: true })).toBeVisible();
   await expect(history.locator('.weight-readonly')).toHaveText('42,5 кг');
   await expect(history.getByText('1 × 8 повторов', { exact: true })).toBeVisible();
+  await expect(history.locator('.history-description')).toHaveText('Разминка 5 минут\nСпокойный темп');
+  await expect(history.locator('.exercise-description')).toHaveText('Спина ровная\nОтдых 90 секунд');
+  page.once('dialog', dialog => dialog.accept());
+  await history.getByRole('button', { name: 'Удалить из истории', exact: true }).click();
+  await expect(history).not.toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Здесь будет твой прогресс' })).toBeVisible();
+  await page.reload();
+  await navigate(page, 'История');
+  await expect(page.getByRole('heading', { name: 'Здесь будет твой прогресс' })).toBeVisible();
   expect(await page.evaluate(() => navigator.onLine)).toBe(false);
 });

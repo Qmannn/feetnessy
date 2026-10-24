@@ -96,6 +96,7 @@ function ExerciseRow({ exercise, index, onChange, busy, onEditingChange, onStart
         {uniform ? <><strong>{formatNumber(exercise.sets[0]?.weightKg ?? 0)}</strong><span>кг</span></> : <span>Подходы</span>}<ChevronDown size={14} />
       </button> : uniform ? <div className="weight-readonly"><strong>{formatNumber(exercise.sets[0]?.weightKg ?? 0)}</strong> кг</div> : null}
     </div>
+    {exercise.description?.trim() && <p className="description exercise-description">{exercise.description}</p>}
     {!uniform && !editing && <div className="set-summary">{exercise.sets.map((s, i) => <span key={i}>{i + 1}. {formatNumber(s.weightKg)} кг × {s.reps}</span>)}</div>}
     {editing && <div className="exercise-editor">
       <p className="muted small">Допустимые значения сохраняются автоматически. Закрой редактор перед завершением тренировки.</p>

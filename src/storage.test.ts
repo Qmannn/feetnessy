@@ -102,6 +102,49 @@ describe('IndexedDB', () => {
     expect((await db.states.get('current'))?.revision).toBe(1);
   });
 
+  it('сохраняет старые строки и копии без описаний без миграции схемы', async () => {
+    const state = saveDraft(completeWorkout(fixture(), false, 'old'), 'p', 'w', fixture().programs[0].workouts[0].exercises);
+    await db.states.put({ id: 'current', state, revision: 3 });
+    const row = await db.states.get('current');
+    expect(await loadState()).toStrictEqual(state);
+    expect(await db.states.get('current')).toStrictEqual(row);
+    const backup = JSON.stringify({ format: 'feetnessy', version: 1, exportedAt: '2026-01-01T00:00:00.000Z', data: state });
+    await replaceState(parseBackup(backup));
+    db.close();
+    await db.open();
+    expect(await loadState()).toStrictEqual(state);
+    expect(db.verno).toBe(1);
+  });
+
+  it.each(['', 'Разминка\nОсновная часть\n  Заминка  '])('сохраняет описания %j в строке и после импорта', async description => {
+    const initial = fixture();
+    initial.programs[0].workouts[0].description = description;
+    initial.programs[0].workouts[0].exercises[0].description = description;
+    const completed = completeWorkout(initial, true, 'described');
+    const state = saveDraft(completed, 'p', 'w', initial.programs[0].workouts[0].exercises);
+    await persistState(state);
+    db.close();
+    await db.open();
+    expect(await loadState()).toStrictEqual(state);
+    expect((await db.states.get('current'))?.state).toStrictEqual(state);
+    await replaceState(emptyState());
+    await replaceState(parseBackup(exportBackup(state)));
+    expect(await loadState()).toStrictEqual(state);
+    expect(db.verno).toBe(1);
+  });
+
+  it('отклоняет нестроковые описания при записи и чтении', async () => {
+    const state = fixture();
+    await persistState(state);
+    const before = await db.states.get('current');
+    Object.assign(state.programs[0].workouts[0], { description: null });
+    await expect(persistState(state)).rejects.toThrow(/Описание/);
+    await expect(replaceState(state)).rejects.toThrow(/Описание/);
+    expect(await db.states.get('current')).toStrictEqual(before);
+    await db.states.put({ id: 'current', state });
+    await expect(loadState()).rejects.toThrow(/Описание/);
+  });
+
   it.each(['persist', 'replace'])('отклоняет устаревшую операцию %s, сохраняя чужое обновление', async operation => {
     await persistState(fixture());
     await loadState();

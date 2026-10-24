@@ -1,11 +1,11 @@
 export interface SetEntry { weightKg: number; reps: number }
-export interface Exercise { id: string; name: string; sets: SetEntry[] }
-export interface Workout { id: string; name: string; exercises: Exercise[] }
+export interface Exercise { id: string; name: string; description?: string; sets: SetEntry[] }
+export interface Workout { id: string; name: string; description?: string; exercises: Exercise[] }
 export interface Program { id: string; name: string; workouts: Workout[]; nextWorkoutId: string | null }
 export interface Draft { programId: string; workoutId: string; exercises: Exercise[]; updatedAt: string }
 export interface HistoryEntry {
   id: string; programId: string; workoutId: string; programName: string; workoutName: string;
-  exercises: Exercise[]; completedAt: string;
+  workoutDescription?: string; exercises: Exercise[]; completedAt: string;
 }
 export interface AppState {
   schemaVersion: 1; activeProgramId: string | null; programs: Program[]; drafts: Draft[]; history: HistoryEntry[];
@@ -27,9 +27,12 @@ export const getNextWorkout = (program: Program): Workout | undefined => program
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
-function record(value: unknown, keys: string[], label: string): asserts value is Record<string, unknown> {
+function record(value: unknown, keys: string[], label: string, optionalKeys: string[] = []): asserts value is Record<string, unknown> {
   check(typeof value === 'object' && value !== null && !Array.isArray(value), `${label}: ожидается объект`);
-  check(Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)), `${label}: неверный набор полей`);
+  check(keys.every(key => Object.hasOwn(value, key)) && Object.keys(value).every(key => keys.includes(key) || optionalKeys.includes(key)), `${label}: неверный набор полей`);
+}
+function optionalDescription(value: Record<string, unknown>, key: string): void {
+  check(!Object.hasOwn(value, key) || typeof value[key] === 'string', 'Описание должно быть строкой');
 }
 function text(value: unknown, label: string): asserts value is string {
   check(typeof value === 'string' && value.trim().length > 0, `${label}: строка не должна быть пустой`);
@@ -52,7 +55,8 @@ export function validateExercises(exercises: unknown): asserts exercises is Exer
   array(exercises, 'Упражнения');
   const ids = new Set<string>();
   for (const exercise of exercises) {
-    record(exercise, ['id', 'name', 'sets'], 'Упражнение');
+    record(exercise, ['id', 'name', 'sets'], 'Упражнение', ['description']);
+    optionalDescription(exercise, 'description');
     text(exercise.id, 'ID упражнения');
     unique(exercise.id, ids, 'Упражнения');
     text(exercise.name, 'Название упражнения');
@@ -85,7 +89,8 @@ export function validateState(input: unknown): AppState {
     const ownWorkouts = new Set<string>();
     programs.set(program.id, ownWorkouts);
     for (const workout of program.workouts) {
-      record(workout, ['id', 'name', 'exercises'], 'Тренировка');
+      record(workout, ['id', 'name', 'exercises'], 'Тренировка', ['description']);
+      optionalDescription(workout, 'description');
       text(workout.id, 'ID тренировки');
       text(workout.name, 'Название тренировки');
       unique(workout.id, workouts, 'Тренировки');
@@ -107,7 +112,8 @@ export function validateState(input: unknown): AppState {
   }
   const history = new Set<string>();
   for (const entry of input.history) {
-    record(entry, ['id', 'programId', 'workoutId', 'programName', 'workoutName', 'exercises', 'completedAt'], 'Запись истории');
+    record(entry, ['id', 'programId', 'workoutId', 'programName', 'workoutName', 'exercises', 'completedAt'], 'Запись истории', ['workoutDescription']);
+    optionalDescription(entry, 'workoutDescription');
     text(entry.id, 'ID записи истории');
     unique(entry.id, history, 'История');
     text(entry.programId, 'ID программы истории');
@@ -143,10 +149,18 @@ export function completeWorkout(state: AppState, saveTemplate: boolean, completi
   const exercises = clone(draft?.exercises ?? workout.exercises);
   validateExercises(exercises);
   check(exercises.length > 0, 'Нельзя завершить пустую тренировку');
-  next.history.push({ id: completionId, programId: program.id, workoutId: workout.id, programName: program.name, workoutName: workout.name, exercises, completedAt: new Date().toISOString() });
+  next.history.push({ id: completionId, programId: program.id, workoutId: workout.id, programName: program.name, workoutName: workout.name, ...(Object.hasOwn(workout, 'description') ? { workoutDescription: workout.description } : {}), exercises, completedAt: new Date().toISOString() });
   if (saveTemplate && draft) workout.exercises = clone(exercises);
   program.nextWorkoutId = program.workouts[(program.workouts.indexOf(workout) + 1) % program.workouts.length].id;
   next.drafts = next.drafts.filter(d => d.programId !== program.id || d.workoutId !== workout.id);
+  return next;
+}
+
+export function deleteHistoryEntry(state: AppState, entryId: string): AppState {
+  const next = validateState(state);
+  const index = next.history.findIndex(entry => entry.id === entryId);
+  check(index !== -1, 'Запись истории не найдена');
+  next.history.splice(index, 1);
   return next;
 }
 

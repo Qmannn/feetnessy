@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clone, completeWorkout, emptyState, exportBackup, getActiveProgram, getNextWorkout, newId, parseBackup, saveDraft, validateExercises, validateState, type AppState, type Exercise } from './domain';
+import { clone, completeWorkout, deleteHistoryEntry, emptyState, exportBackup, getActiveProgram, getNextWorkout, newId, parseBackup, saveDraft, validateExercises, validateState, type AppState, type Exercise } from './domain';
 
 const exercises = (weightKg = 20): Exercise[] => [{ id: 'exercise', name: 'Приседание', sets: [{ weightKg, reps: 8 }] }];
 function fixture(): AppState {
@@ -121,6 +121,66 @@ describe('черновики и независимые снимки', () => {
 });
 
 describe('валидация и резервная копия', () => {
+  it('загружает старую копию версии 1 без добавления описаний', () => {
+    const state = saveDraft(completeWorkout(fixture(), false, 'old'), 'p', 'w2', exercises());
+    const backup = JSON.stringify({ format: 'feetnessy', version: 1, exportedAt: '2026-01-01T00:00:00.000Z', data: state });
+    expect(parseBackup(backup)).toStrictEqual(state);
+    expect(validateState(state)).toStrictEqual(state);
+    expect(state.history[0]).not.toHaveProperty('workoutDescription');
+    expect(state.programs[0].workouts[0]).not.toHaveProperty('description');
+    expect(state.history[0].exercises[0]).not.toHaveProperty('description');
+  });
+
+  it.each(['', 'Первая строка\nВторая строка\n  без нормализации  '])('сохраняет описания %j в копии версии 1', description => {
+    const state = fixture();
+    state.programs[0].workouts[0].description = description;
+    state.programs[0].workouts[0].exercises[0].description = description;
+    const completed = completeWorkout(state, true, 'described');
+    const draftExercises = exercises();
+    draftExercises[0].description = description;
+    const saved = saveDraft(completed, 'p', 'w2', draftExercises);
+    const backup = exportBackup(saved);
+    expect(JSON.parse(backup)).toMatchObject({ version: 1, data: { schemaVersion: 1 } });
+    expect(parseBackup(backup)).toStrictEqual(saved);
+    expect(saved.history[0].workoutDescription).toBe(description);
+    expect(saved.history[0].exercises[0].description).toBe(description);
+    expect(saved.drafts[0].exercises[0].description).toBe(description);
+  });
+
+  it.each([undefined, null, 42, true, [], {}])('отклоняет нестроковое описание %j во всех разрешённых местах', description => {
+    const state = saveDraft(completeWorkout(fixture(), false, 'done'), 'p', 'w2', exercises());
+    const targets: [object, string][] = [
+      [state.programs[0].workouts[0], 'description'],
+      [state.programs[0].workouts[0].exercises[0], 'description'],
+      [state.drafts[0].exercises[0], 'description'],
+      [state.history[0], 'workoutDescription'],
+      [state.history[0].exercises[0], 'description'],
+    ];
+    for (const [target, key] of targets) {
+      Object.assign(target, { [key]: description });
+      expect(() => validateState(state)).toThrow(/Описание/);
+      if (description !== undefined) expect(() => parseBackup(JSON.stringify({ format: 'feetnessy', version: 1, exportedAt: '2026-01-01T00:00:00.000Z', data: state }))).toThrow(/Описание/);
+      Reflect.deleteProperty(target, key);
+    }
+  });
+
+  it('не разрешает неизвестные поля и описания на других уровнях', () => {
+    const state = saveDraft(completeWorkout(fixture(), false, 'done'), 'p', 'w2', exercises());
+    const targets = [state, state.programs[0], state.programs[0].workouts[0], state.programs[0].workouts[0].exercises[0], state.programs[0].workouts[0].exercises[0].sets[0], state.drafts[0], state.drafts[0].exercises[0], state.history[0], state.history[0].exercises[0]];
+    for (const target of targets) {
+      Object.assign(target, { extra: 'unknown' });
+      expect(() => validateState(state)).toThrow(/набор полей/);
+      Reflect.deleteProperty(target, 'extra');
+    }
+    for (const target of [state, state.programs[0], state.drafts[0], state.history[0], state.programs[0].workouts[0].exercises[0].sets[0]]) {
+      Object.assign(target, { description: '' });
+      expect(() => validateState(state)).toThrow(/набор полей/);
+      Reflect.deleteProperty(target, 'description');
+    }
+    const envelope = JSON.parse(exportBackup(state));
+    expect(() => parseBackup(JSON.stringify({ ...envelope, description: '' }))).toThrow(/набор полей/);
+  });
+
   it('сохраняет полное состояние и возвращает независимую копию', () => {
     const state = saveDraft(completeWorkout(fixture(), true, 'one'), 'p', 'w2', exercises(35));
     expect(parseBackup(exportBackup(state))).toEqual(state);
@@ -181,5 +241,56 @@ describe('валидация и резервная копия', () => {
     for (const change of [{ format: 'other' }, { version: 2 }, { exportedAt: '2026-02-30T12:00:00.000Z' }, { data: {} }]) {
       expect(() => parseBackup(JSON.stringify({ ...envelope, ...change }))).toThrow();
     }
+  });
+});
+
+describe('описания в независимых снимках', () => {
+  it.each([true, false])('история не меняется после редактирования и удаления шаблона, saveTemplate=%s', saveTemplate => {
+    const original = fixture();
+    original.programs[0].workouts[0].description = 'План\nтренировки';
+    original.programs[0].workouts[0].exercises[0].description = 'Шаблон';
+    const edited = exercises(35);
+    edited[0].description = 'Фактическое\nупражнение';
+    const draft = saveDraft(original, 'p', 'w1', edited);
+    const state = completeWorkout(draft, saveTemplate, 'snapshot');
+    const snapshot = clone(state.history[0]);
+    expect(snapshot.workoutDescription).toBe('План\nтренировки');
+    expect(snapshot.exercises[0].description).toBe('Фактическое\nупражнение');
+    expect(state.history[0].exercises).not.toBe(state.programs[0].workouts[0].exercises);
+    state.programs[0].workouts[0].description = 'Изменено';
+    state.programs[0].workouts[0].exercises[0].description = 'Изменено';
+    state.programs[0].workouts[0].exercises[0].sets[0].reps = 99;
+    expect(state.history[0]).toStrictEqual(snapshot);
+    state.programs[0].workouts.shift();
+    expect(validateState(state).history[0]).toStrictEqual(snapshot);
+    state.programs = [];
+    state.activeProgramId = null;
+    expect(validateState(state).history[0]).toStrictEqual(snapshot);
+    expect(draft.programs[0].workouts[0].description).toBe('План\nтренировки');
+    expect(draft.drafts).toHaveLength(1);
+  });
+});
+
+describe('удаление записи истории', () => {
+  it('удаляет только выбранную запись, не меняя исходное состояние, очередь, шаблоны и черновики', () => {
+    let state = fixture();
+    for (const id of ['first', 'middle', 'last']) state = completeWorkout(state, false, id);
+    state = saveDraft(state, 'p', 'w4', exercises(45));
+    const before = clone(state);
+    const result = deleteHistoryEntry(state, 'middle');
+    expect(result).toStrictEqual({ ...before, history: [before.history[0], before.history[2]] });
+    expect(state).toStrictEqual(before);
+    result.programs[0].workouts[0].exercises[0].sets[0].weightKg = 999;
+    result.drafts[0].exercises[0].sets[0].reps = 99;
+    result.history[0].exercises[0].name = 'Изменено';
+    expect(state).toStrictEqual(before);
+  });
+
+  it('может удалить последнюю запись и отклоняет отсутствующий ID с русской ошибкой', () => {
+    const state = completeWorkout(fixture(), false, 'only');
+    expect(deleteHistoryEntry(state, 'only').history).toEqual([]);
+    for (const id of ['missing', '']) expect(() => deleteHistoryEntry(state, id)).toThrow('Запись истории не найдена');
+    expect(state.history).toHaveLength(1);
+    expect(() => deleteHistoryEntry({ ...state, activeProgramId: 'missing' }, 'only')).toThrow(/программа/);
   });
 });

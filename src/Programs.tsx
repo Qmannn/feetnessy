@@ -3,8 +3,8 @@ import type { AppState, Program } from './domain';
 import { clone, newId, validateExercises } from './domain';
 
 type EditableSet = { weightKg: string; reps: string };
-type EditableExercise = { id: string; name: string; sets: EditableSet[] };
-type EditableWorkout = { id: string; name: string; exercises: EditableExercise[] };
+type EditableExercise = { id: string; name: string; description?: string; sets: EditableSet[] };
+type EditableWorkout = { id: string; name: string; description?: string; exercises: EditableExercise[] };
 type EditableProgram = Omit<Program, 'workouts'> & { workouts: EditableWorkout[] };
 type Props = {
   state: AppState;
@@ -206,10 +206,18 @@ export default function Programs({ state, onChange, onBackup, busy, onEditingCha
             <label className="field"><span className="field-label">Название тренировки</span>
               <input value={workout.name} onChange={event => update(value => { value.workouts[wi].name = event.target.value; })} />
             </label>
+            <label className="field"><span className="field-label">Описание тренировки <span aria-hidden="true">(необязательно)</span></span>
+              <textarea aria-label="Описание тренировки" rows={3} value={workout.description ?? ''} placeholder="Особенности тренировки, техника и отдых"
+                onChange={event => update(value => { value.workouts[wi].description = event.target.value; })} />
+            </label>
             {workout.exercises.length === 0 && <p className="muted">Нет упражнений. Пустой шаблон можно сохранить, но нельзя завершить как тренировку.</p>}
             {workout.exercises.map((exercise, ei) => <section className="exercise-card stack" key={exercise.id} aria-label={`Упражнение ${ei + 1}`}>
               <label className="field"><span className="field-label">Упражнение {ei + 1}</span>
                 <input value={exercise.name} onChange={event => update(value => { value.workouts[wi].exercises[ei].name = event.target.value; })} />
+              </label>
+              <label className="field"><span className="field-label">Описание упражнения <span aria-hidden="true">(необязательно)</span></span>
+                <textarea aria-label="Описание упражнения" rows={3} value={exercise.description ?? ''} placeholder="Подсказки по технике и отдых между подходами"
+                  onChange={event => update(value => { value.workouts[wi].exercises[ei].description = event.target.value; })} />
               </label>
               <div className="row">
                 <button type="button" className="icon-button" disabled={ei === 0} aria-label={`Поднять упражнение ${ei + 1}`} onClick={() => update(value => { value.workouts[wi].exercises = move(value.workouts[wi].exercises, ei, -1); })}>↑</button>

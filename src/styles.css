@@ -14,8 +14,8 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; min-width: 0; }
-button, input { font: inherit; }
-button, a, input { -webkit-tap-highlight-color: transparent; }
+button, input, textarea { font: inherit; }
+button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .48; }
 button, input, a { touch-action: manipulation; }
@@ -88,6 +88,11 @@ a { color: inherit; }
 .set-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0 36px; }
 .set-summary span { font-size: 11px; background: #f5f6f1; padding: 5px 8px; border-radius: 6px; }
 .is-editing { border-color: #9bb47d; }
+.description { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.workout-description { color: #c3d0c5; margin-bottom: 16px; }
+.exercise-description { color: var(--muted); margin: 12px 0 0 36px; }
+.history-description { margin-bottom: 20px; color: var(--muted); }
+.history-actions { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 .exercise-editor { border-top: 1px solid var(--line); margin-top: 17px; padding-top: 15px; display: flex; flex-direction: column; gap: 12px; }
 .saved-note { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 10px; color: #64854e; margin-top: 14px; }
 .workout-footer { margin-top: 26px; }
@@ -123,6 +128,8 @@ a { color: inherit; }
 .field-label { font-size: 12px; line-height: 1.45; font-weight: 600; color: #60705b; overflow-wrap: anywhere; }
 input:not([type="checkbox"]):not([type="file"]) { display: block; width: 100%; min-width: 0; min-height: 46px; padding: 10px 11px; border: 1px solid #dfe5d8; border-radius: 10px; background: #fbfcf9; color: var(--forest); font-size: 16px; line-height: 1.4; }
 input:disabled { opacity: .65; }
+textarea { display: block; width: 100%; min-width: 0; min-height: 96px; padding: 10px 11px; border: 1px solid #dfe5d8; border-radius: 10px; background: #fbfcf9; color: var(--forest); font-size: 16px; line-height: 1.5; resize: vertical; }
+textarea:disabled { opacity: .65; }
 .set-grid { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 44px; align-items: end; gap: 8px; min-width: 0; }
 .set-grid > span:first-child { align-self: center; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
 .set-grid input { text-align: center; padding-inline: 5px !important; }
