@@ -2,7 +2,7 @@ export interface SetEntry { weightKg: number; reps: number }
 export interface Exercise { id: string; name: string; description?: string; sets: SetEntry[] }
 export interface Workout { id: string; name: string; description?: string; exercises: Exercise[] }
 export interface Program { id: string; name: string; workouts: Workout[]; nextWorkoutId: string | null }
-export interface Draft { programId: string; workoutId: string; exercises: Exercise[]; updatedAt: string }
+export interface Draft { programId: string; workoutId: string; exercises: Exercise[]; updatedAt: string; nextWeights?: { exerciseId: string; weightKg: number }[] }
 export interface HistoryEntry {
   id: string; programId: string; workoutId: string; programName: string; workoutName: string;
   workoutDescription?: string; exercises: Exercise[]; completedAt: string;
@@ -102,12 +102,23 @@ export function validateState(input: unknown): AppState {
   check(input.activeProgramId === null || programs.has(input.activeProgramId as string), 'Активная программа не найдена');
   const drafts = new Set<string>();
   for (const draft of input.drafts) {
-    record(draft, ['programId', 'workoutId', 'exercises', 'updatedAt'], 'Черновик');
+    record(draft, ['programId', 'workoutId', 'exercises', 'updatedAt'], 'Черновик', ['nextWeights']);
     text(draft.programId, 'ID программы черновика');
     text(draft.workoutId, 'ID тренировки черновика');
     check(programs.get(draft.programId)?.has(draft.workoutId), 'Черновик ссылается на отсутствующую тренировку');
     unique(JSON.stringify([draft.programId, draft.workoutId]), drafts, 'Черновики');
     validateExercises(draft.exercises);
+    if (Object.hasOwn(draft, 'nextWeights')) {
+      array(draft.nextWeights, 'Веса следующей тренировки');
+      const exerciseIds = new Set<string>();
+      for (const weight of draft.nextWeights) {
+        record(weight, ['exerciseId', 'weightKg'], 'Вес следующей тренировки');
+        text(weight.exerciseId, 'ID упражнения');
+        unique(weight.exerciseId, exerciseIds, 'Веса следующей тренировки');
+        check(draft.exercises.some(exercise => exercise.id === weight.exerciseId), 'Упражнение для нового веса не найдено');
+        check(typeof weight.weightKg === 'number' && Number.isFinite(weight.weightKg) && weight.weightKg >= 0, 'Вес должен быть конечным неотрицательным числом');
+      }
+    }
     timestamp(draft.updatedAt);
   }
   const history = new Set<string>();
@@ -128,12 +139,27 @@ export function validateState(input: unknown): AppState {
   return clone(input as unknown as AppState);
 }
 
+function changedWeights(before: Exercise[], after: Exercise[]): NonNullable<Draft['nextWeights']> {
+  return after.flatMap(exercise => {
+    const previous = before.find(e => e.id === exercise.id);
+    // Adding/removing a set shifts indices; it is not a weight edit.
+    if (previous?.sets.length !== exercise.sets.length) return [];
+    const changed = exercise.sets.filter((set, index) => previous?.sets[index] && set.weightKg !== previous.sets[index].weightKg);
+    return changed.length ? [{ exerciseId: exercise.id, weightKg: changed[changed.length - 1].weightKg }] : [];
+  });
+}
+
 export function saveDraft(state: AppState, programId: string, workoutId: string, exercises: Exercise[]): AppState {
   const next = validateState(state);
   check(next.programs.find(p => p.id === programId)?.workouts.some(w => w.id === workoutId), 'Тренировка для черновика не найдена');
   validateExercises(exercises);
+  const workout = next.programs.find(p => p.id === programId)!.workouts.find(w => w.id === workoutId)!;
+  const previous = next.drafts.find(d => d.programId === programId && d.workoutId === workoutId);
+  const nextWeights = new Map((previous?.nextWeights ?? changedWeights(workout.exercises, previous?.exercises ?? [])).map(weight => [weight.exerciseId, weight.weightKg]));
+  for (const weight of changedWeights(previous?.exercises ?? workout.exercises, exercises)) nextWeights.set(weight.exerciseId, weight.weightKg);
+  const weights = [...nextWeights].filter(([id]) => exercises.some(e => e.id === id)).map(([exerciseId, weightKg]) => ({ exerciseId, weightKg }));
   next.drafts = next.drafts.filter(d => d.programId !== programId || d.workoutId !== workoutId);
-  next.drafts.push({ programId, workoutId, exercises: clone(exercises), updatedAt: new Date().toISOString() });
+  next.drafts.push({ programId, workoutId, exercises: clone(exercises), updatedAt: new Date().toISOString(), ...(weights.length ? { nextWeights: weights } : {}) });
   return next;
 }
 
@@ -147,10 +173,15 @@ export function completeWorkout(state: AppState, saveTemplate: boolean, completi
   check(workout, 'Нет следующей тренировки');
   const draft = next.drafts.find(d => d.programId === program.id && d.workoutId === workout.id);
   const exercises = clone(draft?.exercises ?? workout.exercises);
+  const nextWeights = draft?.nextWeights ?? changedWeights(workout.exercises, exercises);
   validateExercises(exercises);
   check(exercises.length > 0, 'Нельзя завершить пустую тренировку');
   next.history.push({ id: completionId, programId: program.id, workoutId: workout.id, programName: program.name, workoutName: workout.name, ...(Object.hasOwn(workout, 'description') ? { workoutDescription: workout.description } : {}), exercises, completedAt: new Date().toISOString() });
   if (saveTemplate && draft) workout.exercises = clone(exercises);
+  for (const weight of nextWeights) {
+    const exercise = workout.exercises.find(e => e.id === weight.exerciseId);
+    if (exercise) exercise.sets.forEach(set => { set.weightKg = weight.weightKg; });
+  }
   program.nextWorkoutId = program.workouts[(program.workouts.indexOf(workout) + 1) % program.workouts.length].id;
   next.drafts = next.drafts.filter(d => d.programId !== program.id || d.workoutId !== workout.id);
   return next;

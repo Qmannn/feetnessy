@@ -86,7 +86,7 @@ async function noOverflow(page: Page) {
   expect(overflow.controls, 'Visible controls/cards must fit the viewport').toEqual([]);
 }
 
-test('create two workouts, autosave a comma decimal, and retain one-off history without changing the template', async ({ page }) => {
+test('create two workouts, autosave a comma decimal, and carry the weight into the next workout', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Большое начинается с первого подхода' })).toBeVisible();
   await page.getByRole('button', { name: 'Создать программу', exact: true }).click();
@@ -121,12 +121,12 @@ test('create two workouts, autosave a comma decimal, and retain one-off history 
   await expect(page.getByRole('button', { name: 'Изменить Приседания', exact: true })).toContainText('42,5');
   await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Сохранить новые значения?' });
-  await dialog.getByRole('checkbox', { name: 'Использовать изменения в следующих тренировках' }).uncheck();
+  await dialog.getByRole('checkbox', { name: 'Также сохранить изменения повторов и количества подходов' }).uncheck();
   await dialog.getByRole('button', { name: 'Завершить тренировку', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Тренировка Б', exact: true })).toBeVisible();
 
   const completed = await storedState(page);
-  expect(completed.programs[0].workouts[0]).toEqual(original);
+  expect(completed.programs[0].workouts[0]).toEqual({ ...original, exercises: [{ ...original.exercises[0], sets: [{ weightKg: 42.5, reps: 8 }] }] });
   expect(completed.drafts).toEqual([]);
   expect(completed.history).toHaveLength(1);
   expect(completed.history[0]).toMatchObject({
@@ -145,8 +145,32 @@ test('create two workouts, autosave a comma decimal, and retain one-off history 
   await navigate(page, 'Тренировка');
   await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Тренировка А', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Изменить Приседания', exact: true })).toContainText('40');
+  await expect(page.getByRole('button', { name: 'Изменить Приседания', exact: true })).toContainText('42,5');
   expect((await storedState(page)).history.find(entry => entry.workoutId === original.id)).toEqual(completed.history[0]);
+});
+
+test('last edited weight applies to every set next time, including a decrease after an increase', async ({ page }) => {
+  const initial = fixture();
+  initial.programs[0].workouts = [initial.programs[0].workouts[0]];
+  initial.programs[0].workouts[0].exercises[0].sets = [8, 10, 12].map(reps => ({ weightKg: 40, reps }));
+  await seed(page, initial);
+  for (const [index, weightKg] of [45, 35].entries()) {
+    await page.getByRole('button', { name: 'Изменить Приседания со штангой', exact: true }).click();
+    // The decrease is edited in the first set: the last set still has the higher weight.
+    await page.getByLabel(`Вес, подход ${index === 0 ? 3 : 1}`, { exact: true }).fill(String(weightKg));
+    await expect.poll(async () => (await storedState(page)).drafts[0]?.nextWeights?.[0]?.weightKg).toBe(weightKg);
+    await page.getByRole('button', { name: 'Готово', exact: true }).click();
+    await page.reload();
+    await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Сохранить новые значения?' });
+    await dialog.getByRole('checkbox').uncheck();
+    await dialog.getByRole('button', { name: 'Завершить тренировку', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    const completed = await storedState(page);
+    expect(completed.programs[0].workouts[0].exercises[0].sets).toEqual([8, 10, 12].map(reps => ({ weightKg, reps })));
+    expect(completed.history.at(-1)!.exercises[0].sets.map(s => s.weightKg)).toEqual(index === 0 ? [40, 40, 45] : [35, 45, 45]);
+    await page.reload();
+  }
 });
 
 test('undo restores the exact queue, draft, and history and survives reload', async ({ page }) => {

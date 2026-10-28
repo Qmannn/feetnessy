@@ -102,7 +102,7 @@ describe('черновики и независимые снимки', () => {
     const draft = saveDraft(fixture(), 'p', 'w1', exercises(45));
     const state = completeWorkout(draft, saveTemplate, 'done');
     expect(state.history[0].exercises[0].sets[0].weightKg).toBe(45);
-    expect(state.programs[0].workouts[0].exercises[0].sets[0].weightKg).toBe(saveTemplate ? 45 : 20);
+    expect(state.programs[0].workouts[0].exercises[0].sets[0].weightKg).toBe(45);
     expect(state.drafts).toHaveLength(0);
     expect(draft.drafts).toHaveLength(1);
     state.programs[0].workouts[0].exercises[0].sets[0].weightKg = 999;
@@ -117,6 +117,70 @@ describe('черновики и независимые снимки', () => {
     state.programs = [];
     state.activeProgramId = null;
     expect(validateState(state).history).toHaveLength(1);
+  });
+});
+
+describe('вес следующей тренировки', () => {
+  it.each([true, false])('переносит увеличение и затем уменьшение на все подходы, saveTemplate=%s', saveTemplate => {
+    let state = fixture();
+    state.programs[0].workouts[0].exercises[0].sets = [8, 10, 12].map(reps => ({ weightKg: 20, reps }));
+    const original = clone(state);
+    for (const weightKg of [25, 15, 0, 2.5]) {
+      const edited = clone(state.programs[0].workouts[0].exercises);
+      edited[0].sets[2].weightKg = weightKg;
+      state = completeWorkout(saveDraft(state, 'p', 'w1', edited), saveTemplate, `weight-${weightKg}`);
+      expect(state.programs[0].workouts[0].exercises[0].sets).toEqual([8, 10, 12].map(reps => ({ weightKg, reps })));
+      expect(state.history.at(-1)!.exercises).toEqual(edited);
+      expect(state.programs[0].workouts[1]).toEqual(original.programs[0].workouts[1]);
+      for (let n = 0; n < 3; n++) state = completeWorkout(state, false, `${weightKg}-${n}`);
+    }
+    expect(original.programs[0].workouts[0].exercises[0].sets[0].weightKg).toBe(20);
+  });
+
+  it('запоминает последнее изменение, а не максимальный вес или последний подход', () => {
+    const state = fixture();
+    state.programs[0].workouts[0].exercises[0].sets = [20, 20, 20].map(weightKg => ({ weightKg, reps: 8 }));
+    const edited = clone(state.programs[0].workouts[0].exercises);
+    edited[0].sets[2].weightKg = 30;
+    let saved = saveDraft(state, 'p', 'w1', edited);
+    edited[0].sets[0].weightKg = 15;
+    saved = parseBackup(exportBackup(saveDraft(saved, 'p', 'w1', edited)));
+    edited[0].sets[1].reps = 12;
+    saved = saveDraft(saved, 'p', 'w1', edited);
+    const completed = completeWorkout(saved, false, 'last-change');
+    expect(completed.programs[0].workouts[0].exercises[0].sets.map(s => s.weightKg)).toEqual([15, 15, 15]);
+    expect(completed.history[0].exercises).toEqual(edited);
+    expect(saved.programs).toEqual(state.programs);
+  });
+
+  it('не выравнивает разные веса без изменения веса и поддерживает старые черновики', () => {
+    const state = fixture();
+    state.programs[0].workouts[0].exercises[0].sets = [10, 20, 30].map(weightKg => ({ weightKg, reps: 8 }));
+    const edited = clone(state.programs[0].workouts[0].exercises);
+    edited[0].sets[0].reps = 12;
+    const saved = saveDraft(state, 'p', 'w1', edited);
+    expect(completeWorkout(saved, true, 'reps').programs[0].workouts[0].exercises).toEqual(edited);
+    edited[0].sets[2].weightKg = 25;
+    saved.drafts[0].exercises = edited;
+    expect(completeWorkout(saved, false, 'legacy').programs[0].workouts[0].exercises[0].sets.map(s => s.weightKg)).toEqual([25, 25, 25]);
+  });
+
+  it('не считает добавление или удаление подхода изменением веса', () => {
+    const state = fixture();
+    state.programs[0].workouts[0].exercises[0].sets = [10, 20, 30].map(weightKg => ({ weightKg, reps: 8 }));
+    for (const weights of [[20, 30], [10, 20, 30, 30]]) {
+      const edited = clone(state.programs[0].workouts[0].exercises);
+      edited[0].sets = weights.map(weightKg => ({ weightKg, reps: 8 }));
+      const saved = saveDraft(state, 'p', 'w1', edited);
+      expect(saved.drafts[0].nextWeights).toBeUndefined();
+      expect(completeWorkout(saved, false, `structure-${weights.length}`).programs[0].workouts).toEqual(state.programs[0].workouts);
+    }
+  });
+
+  it.each([null, {}, [{ exerciseId: 'missing', weightKg: 10 }], [{ exerciseId: 'exercise', weightKg: -1 }], [{ exerciseId: 'exercise', weightKg: Infinity }], [{ exerciseId: 'exercise', weightKg: 10 }, { exerciseId: 'exercise', weightKg: 20 }]])('отклоняет некорректные новые веса %j', nextWeights => {
+    const saved = saveDraft(fixture(), 'p', 'w1', exercises());
+    Object.assign(saved.drafts[0], { nextWeights });
+    expect(() => validateState(saved)).toThrow();
   });
 });
 
